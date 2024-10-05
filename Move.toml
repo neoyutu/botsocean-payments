@@ -1,0 +1,17 @@
+[package]
+name = "botsocean_payments"
+version = "1.0.0"
+authors = []
+
+[addresses]
+
+
+[dev-addresses]
+botsocean_payments = "0x20456adb400a4279b8439cd9e9210ee6be9e434dbfef15ad07a2fc4408136671"
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-core.git"
+rev = "mainnet"
+subdir = "aptos-move/framework/aptos-framework"
+
+[dev-dependencies]
