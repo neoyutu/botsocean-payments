@@ -1,8 +1,7 @@
 module botsocean::payment {
-    use std::error;
     use std::signer;
-    use std::string;
-    use aptos_framework::coin::{Coin, transfer};
+    use std::vector;
+    use aptos_framework::coin::{transfer};
     use aptos_framework::aptos_coin::AptosCoin;
     use aptos_framework::event;
     #[test_only]
@@ -26,99 +25,81 @@ module botsocean::payment {
     }
 
     struct PaymentState has key {
-        authority: address,
         epoch: u64,
         pendingWithdrawals: vector<address>,
     }
 
-    /// Initialize the contract and set the masternode account
+    struct WithdrawalOrder {
+        user: address,
+        amount: u64,
+    }
+        
+    const NOT_OWNER: u64 = 0;
+    const UNINITIALIZED: u64 = 1;
+    const ALREADY_INIT: u64 = 2;
+    const BADREQ_EXECWITHDRAW: u64 = 3;
+    
+    /// Authority init PaymentState under its address
     public entry fun initialize(
-        account: &signer,
-        authority: address
+        signer: &signer,
     ) {
-        // assert!()
-        // asserts(exists<PaymentState>(@botsocean), 0);
-        // let state = PaymentState {
-        //     authority: authority,
-        //     epoch: 0,
-        //     pendingWithdrawals: vector<address>[],
-        // };
-        // move_to(&@botsocean, state);
+        assert!(signer::address_of(signer) == @botsocean, NOT_OWNER);
+        assert!(exists<PaymentState>(@botsocean), ALREADY_INIT);
+        let state = PaymentState {
+            epoch: 0,
+            pendingWithdrawals: vector::empty<address>(),
+        };
+        move_to(signer, state);
     }
 
-    // /// Function for users to deposit APT tokens into their account
-    // public entry fun deposit(account: &signer, amount: u64) {
-    //     let user_addr = signer::address_of(account);
+    /// Function for users to deposit APT tokens into their account
+    public entry fun deposit(account: &signer, amount: u64) {
+        assert!(!exists<PaymentState>(@botsocean), UNINITIALIZED);
+        let user_addr = signer::address_of(account);
+        transfer<AptosCoin>(account, @botsocean, amount);
 
-    //     // Transfer APT coins to the contract
-    //     let coins = aptos_framework::coin::withdraw<AptosCoin>(account, amount);
-    //     aptos_framework::coin::deposit<AptosCoin>(user_addr, coins);
-    //     transfer<AptosCoin>(account, @0xYourContractAddress, amount);
+        event::emit(
+            Deposit { user: user_addr, amount}
+        );
+    }
 
-    //     // Emit event for deposit
-    //     let state = borrow_global_mut<PaymentState>(user_addr);
-    //     Event::emit_event<DepositEvent>(
-    //         &mut state.deposit_event,
-    //         DepositEvent {user: user_addr, amount}
-    //     );
-    // }
+    /// Function for users/providers to request withdrawal
+    public entry fun request_withdrawal(account: &signer) acquires PaymentState {
+        assert!(!exists<PaymentState>(@botsocean), UNINITIALIZED);
+        let payment_state = borrow_global_mut<PaymentState>(@botsocean);
+        let user_addr = signer::address_of(account);
+        let pending_withdrawals= &mut payment_state.pendingWithdrawals;
+        vector::push_back(pending_withdrawals, user_addr);
+        
+        event::emit(
+            WithdrawalRequest { user: user_addr }
+        );
+    }
 
-    // /// Function for users/providers to request withdrawal
-    // public entry fun request_withdrawal(account: &signer, amount: u64) {
-    //     let user_addr = signer::address_of(account);
+    /// Function for the masternode to process and send withdrawals
+    public entry fun execute_withdrawal(
+        signer: &signer,
+        withdrawal_addrs: vector<address>,
+        withdrawal_amts: vector<u64>,
+    )acquires PaymentState {
+        assert!(signer::address_of(signer) == @botsocean, NOT_OWNER);
+        assert!(!exists<PaymentState>(@botsocean), UNINITIALIZED);
+        assert!(vector::length(&withdrawal_addrs) == vector::length(&withdrawal_amts), BADREQ_EXECWITHDRAW);
 
-    //     // Record the withdrawal request
-    //     if (!exists<PendingWithdrawals>(user_addr)) {
-    //         move_to(
-    //             account,
-    //             PendingWithdrawals {
-    //                 withdrawals: vector::empty<Withdrawal>()
-    //             }
-    //         );
-    //     };
+        // Process withdrawals
+        let len = vector::length(&withdrawal_addrs);
+        let i = 0;
+        while (i < len) {
+            let user_addr = vector::borrow(&withdrawal_addrs, i);
+            let amount = vector::borrow(&withdrawal_amts, i);
+            transfer<AptosCoin>(signer, *user_addr, *amount);
+            event::emit(
+                ExecutedWithdrawal { user: *user_addr, amount: *amount}
+            );
+            i = i + 1;
+        };
 
-    //     let pending_withdrawals = borrow_global_mut<PendingWithdrawals>(user_addr);
-    //     let new_request = Withdrawal {user: user_addr, amount};
-    //     vector::push_back(
-    //         &mut pending_withdrawals.withdrawals,
-    //         new_request
-    //     );
-
-    //     // Emit event for withdrawal request
-    //     let state = borrow_global_mut<PaymentState>(user_addr);
-    //     Event::emit_event<WithdrawalEvent>(
-    //         &mut state.withdrawal_event,
-    //         WithdrawalEvent {user: user_addr, amount}
-    //     );
-    // }
-
-    // /// Function for the masternode to process and send withdrawals
-    // public entry fun execute_withdrawal(
-    //     account: &signer,
-    //     withdrawals: vector<Withdrawal>
-    // ) {
-    //     let masternode_addr = signer::address_of(account);
-    //     let state = borrow_global<PaymentState>(masternode_addr);
-
-    //     // Ensure only the masternode can execute withdrawals
-    //     assert!(
-    //         masternode_addr == state.masternode,
-    //         1
-    //     );
-
-    //     // Process withdrawals
-    //     let len = vector::length<Withdrawal>(&withdrawals);
-    //     let i = 0;
-    //     while (i < len) {
-    //         let withdrawal = vector::borrow<Withdrawal>(&withdrawals, i);
-    //         let user_addr = withdrawal.user;
-    //         let amount = withdrawal.amount;
-
-    //         // Transfer coins to the user
-    //         let coins = aptos_framework::coin::withdraw<AptosCoin>(account, amount);
-    //         aptos_framework::coin::deposit<AptosCoin>(user_addr, coins);
-
-    //         i = i + 1;
-    //     }
-    // }
+        let payment_state = borrow_global_mut<PaymentState>(@botsocean);
+        payment_state.pendingWithdrawals = vector::empty();
+    }
 }
